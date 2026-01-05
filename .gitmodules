@@ -1,0 +1,9 @@
+[submodule "crates/aiui"]
+	path = crates/aiui
+	url = https://github.com/OctopusTechnology/aiui.git
+[submodule "crates/playctl"]
+	path = crates/playctl
+	url = https://github.com/OctopusTechnology/playctl.git
+[submodule "crates/vtn"]
+	path = crates/vtn
+	url = https://github.com/OctopusTechnology/vtn.git
