@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-stack-deployment
+  labels:
+    app: voice-stack
+spec:
+  # Single replica is required because JACK cannot be shared across pods
+  replicas: 1
+
+  # Recreate strategy is mandatory when using hostNetwork / hostIPC
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: voice-stack
+
+  template:
+    metadata:
+      labels:
+        app: voice-stack
+    spec:
+      # Use host network so JACK IPC works correctly
+      hostNetwork: true
+
+      # Share host IPC namespace (required for JACK shared memory)
+      hostIPC: true
+
+      restartPolicy: Always
+
+      securityContext:
+        # Run container with the same UID/GID as the host user
+        runAsUser: 1000
+        runAsGroup: 1000
+
+        # Ensure mounted volumes are accessible by the container user
+        fsGroup: 1000
+
+        # Add supplementary groups (audio group is usually GID 29)
+        supplementalGroups:
+          - 29
+
+      containers:
+        - name: voice-stack
+          image: docker.dev.highcom.com.cn/voice-stack:latest
+          imagePullPolicy: Always
+  
+          # Enable interactive mode (similar to docker-compose stdin_open + tty)
+          stdin: true
+          tty: true
+
+          # Load environment variables from ConfigMap (converted from .env)
+          envFrom:
+            - configMapRef:
+                name: voice-stack-env
+
+          volumeMounts:
+            # Mount host shared memory where JACK sockets are created
+            - name: shm
+              mountPath: /dev/shm
+
+            # Mount audio assets as read-only
+            - name: assets-audio
+              mountPath: /home/jackuser/app/assets/audio
+              readOnly: true
+
+            # Mount configuration directory
+            - name: config
+              subPath: znoise_config.toml
+              mountPath: /home/jackuser/app/config/znoise/config.toml
+              readOnly: true
+            
+            - name: config
+              subPath: asrd_config.toml
+              mountPath: /home/jackuser/app/config/asrd/config.toml
+              readOnly: true
+
+            - name: config
+              subPath: playctl.toml
+              mountPath: /home/jackuser/app/config/playctl/config.toml
+              readOnly: true            
+
+      volumes:
+        # Host shared memory (required for JACK IPC)
+        - name: shm
+          hostPath:
+            path: /dev/shm
+            type: Directory
+
+        # Audio assets directory on the host
+        - name: assets-audio
+          hostPath:
+            path: /opt/voice-stack/assets/audio
+            type: Directory
+
+        # Configuration directory on the host
+        - name: config
+          hostPath:
+            path: /opt/k3s/config
+            type: Directory
