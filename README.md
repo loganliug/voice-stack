@@ -6,7 +6,7 @@ Multi-service audio processing Docker container that combines three JACK audio c
 
 This Docker container integrates three JACK client programs that work together to provide comprehensive audio processing:
 
-1. **AIUI ASR** (`aiui/asrctl`) - Speech recognition service with TCP control interface
+1. **AIUI ASR** (`aiui/asrd`) - Speech recognition service with TCP control interface
 2. **VTN ZNOISE** (`vtn/znoise`) - Noise reduction and echo cancellation
 3. **PLAYCTL** (`playctl/playctl`) - HTTP-controlled WAV playback service
 
@@ -201,51 +201,20 @@ jack_lsp -c | grep -A 5 "aiui:"
 jack_lsp -c | grep -A 5 "playctl:"
 ```
 
-## Development
-
-### Project Structure
-
-```
-.
-├── Dockerfile              # Container image definition
-├── docker-compose.yml      # Service orchestration
-├── README.md              # This file
-├── app/
-│   ├── run.sh             # Main startup script (NEW)
-│   ├── aiui/              # AIUI ASR service
-│   │   ├── asrctl         # ASR binary
-│   │   └── talk           # ASR tool
-│   ├── vtn/               # VTN noise reduction service
-│   │   ├── znoise         # VTN binary
-│   │   ├── res/           # Resources (models, configs)
-│   │   └── bin/output/    # Configuration files
-│   └── playctl/           # PLAYCTL playback service
-│       ├── playctl        # Playback binary
-│       └── scripts/       # Helper scripts
-└── lib/
-    └── libvtn.so          # VTN shared library
-```
-
-### Adding New Services
-
-To add a new JACK client service:
-
-1. Add service directory under `app/`
-2. Add start/stop functions in [`app/run.sh`](app/run.sh)
-3. Add routing configuration in `connect_*_routing()` functions
-4. Update this README with new service documentation
-
 ## Service APIs
 
 ### AIUI ASR Service
 
 - **Protocol**: TCP
+- **Default Port**: 53101
 - **Purpose**: Voice recognition control
 - **Commands**: Start/stop ASR processing
 
 ### VTN ZNOISE Service
 
-- **Purpose**: Audio noise reduction and echo cancellation
+- **Protocol**: UDP or UDS
+- **Default Port**: 53103
+- **Purpose**: Audio noise reduction, wakerup event output and echo cancellation
 - **Input**: System audio capture (2 channels)
 - **Output**: Cleaned audio to ASR
 
@@ -253,7 +222,7 @@ To add a new JACK client service:
 
 - **Protocol**: HTTP
 - **Purpose**: WAV file playback control
-- **Default Port**: 8080
+- **Default Port**: 55303
 - **Endpoints**: See service documentation
 
 
@@ -261,9 +230,11 @@ To add a new JACK client service:
 
 共享内存目录位于 /dev/shm
 
+## 未加入版本控制的目录
+ - crates/vtn/vtn-sys/vendor/
+ - res/
 
-## dep
-
+## arm64部署
 ### 建立音频文件存储目录
 ```bash
 sudo mkdir -p /opt/voice-stack/assets/audio
