@@ -260,3 +260,14 @@ To add a new JACK client service:
 ## jackd
 
 共享内存目录位于 /dev/shm
+
+
+## dep
+
+### 建立音频文件存储目录
+```bash
+sudo mkdir -p /opt/voice-stack/assets/audio
+sudo chown 1000:1000 /opt/voice-stack/assets/audio
+sudo chmod 755 /opt/voice-stack/assets/audio
+
+```

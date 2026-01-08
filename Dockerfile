@@ -29,7 +29,7 @@ COPY --chown=jackuser:jackuser \
     run.sh \
     ./
 
-COPY --chown=jackuser:jackuser lib/ ./lib/
+COPY --chown=jackuser:jackuser crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release/ ./lib/
 COPY --chown=jackuser:jackuser res/ ./res/
 
 RUN chmod 755 asrd znoise playctl run.sh \

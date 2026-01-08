@@ -4,6 +4,7 @@ metadata:
   name: voice-stack-deployment
   labels:
     app: voice-stack
+  namespace: robot
 spec:
   # Single replica is required because JACK cannot be shared across pods
   replicas: 1
@@ -51,9 +52,9 @@ spec:
           tty: true
 
           # Load environment variables from ConfigMap (converted from .env)
-          envFrom:
-            - configMapRef:
-                name: voice-stack-env
+          # envFrom:
+          #  - configMapRef:
+          #      name: voice-stack-env
 
           volumeMounts:
             # Mount host shared memory where JACK sockets are created
