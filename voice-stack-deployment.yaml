@@ -46,15 +46,18 @@ spec:
         - name: voice-stack
           image: docker.dev.highcom.com.cn/voice-stack:latest
           imagePullPolicy: Always
+          
+          ports:
+            - name: asrd-tcp
+              containerPort: 53101
+              protocol: TCP
+            - name: playctl-http
+              containerPort: 55303
+              protocol: TCP
   
           # Enable interactive mode (similar to docker-compose stdin_open + tty)
           stdin: true
           tty: true
-
-          # Load environment variables from ConfigMap (converted from .env)
-          # envFrom:
-          #  - configMapRef:
-          #      name: voice-stack-env
 
           volumeMounts:
             # Mount host shared memory where JACK sockets are created
@@ -82,6 +85,10 @@ spec:
               mountPath: /home/jackuser/app/config/playctl/config.toml
               readOnly: true            
 
+            # VTN creates ./bin and ./bin/output
+            - name: vtn-bin
+              mountPath: /home/jackuser/app/bin
+
       volumes:
         # Host shared memory (required for JACK IPC)
         - name: shm
@@ -100,3 +107,7 @@ spec:
           hostPath:
             path: /opt/k3s/config
             type: Directory
+        
+        # Writable bin directory for VTN
+        - name: vtn-bin
+          emptyDir: {}

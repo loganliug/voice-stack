@@ -25,7 +25,9 @@ services:
       - /dev/shm:/dev/shm
       # Mount assets/audio as read-only
       - ./assets/audio:/home/jackuser/app/assets/audio:ro
-      - ./config:/home/jackuser/app/config
+      - ./config:/home/jackuser/app/config:ro
+      # ✅ VTN runtime directory (must be writable)
+      - ./bin:/home/jackuser/app/bin
     
     env_file:
       - .env
