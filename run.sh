@@ -23,8 +23,6 @@ MAX_WAIT_ATTEMPTS=30
 WAIT_INTERVAL=2
 MAX_CONNECT_RETRIES=5
 
-export RUST_LOG=debug
-
 # ============================================================================ 
 # Colors
 # ============================================================================ 
@@ -117,7 +115,7 @@ start_aiui() {
         log_error "AIUI binary not found: $AIUI_DIR/$AIUI_BIN"
         return 1
     fi
-    ./$AIUI_BIN &   # ✅ 容器 stdout
+    ./$AIUI_BIN 2>&1 &
     echo $! > $AIUI_PID_FILE
     log_success "AIUI started (PID: $(cat $AIUI_PID_FILE))"
     sleep 2
@@ -133,7 +131,7 @@ start_vtn() {
         log_error "VTN binary not found: $VTN_DIR/$VTN_BIN"
         return 1
     fi
-    ./$VTN_BIN &   # ✅ 容器 stdout
+    ./$VTN_BIN 2>&1 &
     echo $! > $VTN_PID_FILE
     log_success "VTN started (PID: $(cat $VTN_PID_FILE))"
     sleep 2
@@ -149,7 +147,7 @@ start_playctl() {
         log_error "PLAYCTL binary not found: $PLAYCTL_DIR/$PLAYCTL_BIN"
         return 1
     fi
-    ./$PLAYCTL_BIN &   # ✅ 容器 stdout
+    ./$PLAYCTL_BIN 2>&1 &
     echo $! > $PLAYCTL_PID_FILE
     log_success "PLAYCTL started (PID: $(cat $PLAYCTL_PID_FILE))"
     sleep 2
