@@ -26,17 +26,10 @@ services:
       # Mount assets/audio as read-only
       - ./assets/audio:/home/jackuser/app/assets/audio:ro
       - ./config:/home/jackuser/app/config:ro
-      # ✅ VTN runtime directory (must be writable)
+      # VTN runtime directory (must be writable)
       - ./bin:/home/jackuser/app/bin
     
     env_file:
       - .env
     
     restart: unless-stopped
-
-    # Optional: Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
