@@ -46,9 +46,7 @@ RUN chmod 755 asrd znoise playctl run.sh \
  && mkdir -p \
     bin \
     assets/audio \
-    config/znoise \
-    config/asrd \
-    config/playctl \
+    config \
  && chown -R jackuser:jackuser bin assets config 
 
 ENV \
