@@ -20,6 +20,12 @@ RUN groupadd -g ${GID} jackuser \
  && useradd -m -u ${UID} -g ${GID} -s /bin/bash jackuser \
  && usermod -aG audio jackuser
 
+# ------------------------------------------------------------
+# create app directory explicitly and fix ownership
+# ------------------------------------------------------------
+RUN mkdir -p /home/jackuser/app \
+ && chown -R jackuser:jackuser /home/jackuser
+
 WORKDIR /home/jackuser/app
 
 COPY --chown=jackuser:jackuser \
@@ -38,10 +44,12 @@ RUN chmod 755 asrd znoise playctl run.sh \
  && [ -d res ] && find res -type d -exec chmod 755 {} \; || true \
  && [ -d res ] && find res -type f -exec chmod 644 {} \; || true \
  && mkdir -p \
+    bin \
+    assets/audio \
     config/znoise \
     config/asrd \
-    config/playctl
-
+    config/playctl \
+ && chown -R jackuser:jackuser bin assets config 
 
 ENV \
   LD_LIBRARY_PATH=/home/jackuser/app/lib \

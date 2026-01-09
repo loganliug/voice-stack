@@ -3,7 +3,14 @@ set -e
 set -u
 
 # -------------------------------------------------------------------
-# Default target host information
+# Destination configuration
+# -------------------------------------------------------------------
+# Usage:
+#   ./sync.sh                     -> remote (default)
+#   ./sync.sh cat 172.16.255.127   -> remote
+#   ./sync.sh cat local            -> local sync
+#   ./sync.sh cat localhost        -> local sync
+#   ./sync.sh cat local /tmp/test  -> local sync to custom path
 # -------------------------------------------------------------------
 DEST_USER=${1:-cat}
 DEST_HOST=${2:-172.16.255.127}
@@ -27,17 +34,33 @@ FILES=(
 )
 
 # -------------------------------------------------------------------
-# Ensure destination path exists on remote host
+# Determine sync mode (local or remote)
 # -------------------------------------------------------------------
-echo "Ensuring destination path exists on ${DEST_HOST}"
-ssh "${DEST_USER}@${DEST_HOST}" "mkdir -p ${DEST_PATH}"
+is_local=false
+if [[ "${DEST_HOST}" == "local" || "${DEST_HOST}" == "localhost" ]]; then
+    is_local=true
+fi
 
 # -------------------------------------------------------------------
-# Synchronize files using rsync
+# Ensure destination path exists
 # -------------------------------------------------------------------
-echo "Syncing files to ${DEST_USER}@${DEST_HOST}:${DEST_PATH}"
+if ${is_local}; then
+    echo "Ensuring local destination path exists: ${DEST_PATH}"
+    mkdir -p "${DEST_PATH}"
+else
+    echo "Ensuring remote destination path exists: ${DEST_USER}@${DEST_HOST}:${DEST_PATH}"
+    ssh "${DEST_USER}@${DEST_HOST}" "mkdir -p ${DEST_PATH}"
+fi
 
-# Use -a (archive), -v (verbose), -z (compress), -R (relative) to preserve paths
-rsync -avzR --progress "${FILES[@]}" "${DEST_USER}@${DEST_HOST}:${DEST_PATH}/"
+# -------------------------------------------------------------------
+# Synchronize files
+# -------------------------------------------------------------------
+echo "Syncing files..."
 
-echo "All files synced!"
+if ${is_local}; then
+    rsync -avzR --progress "${FILES[@]}" "${DEST_PATH}/"
+else
+    rsync -avzR --progress "${FILES[@]}" "${DEST_USER}@${DEST_HOST}:${DEST_PATH}/"
+fi
+
+echo "All files synced successfully!"
