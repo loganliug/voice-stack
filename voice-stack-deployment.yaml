@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: voice-stack-deployment
+  namespace: robot
   labels:
     app: voice-stack
-  namespace: robot
 spec:
   replicas: 1
   strategy:
@@ -17,28 +17,32 @@ spec:
       labels:
         app: voice-stack
     spec:
-      # Host networking and IPC are optional; uncomment if needed
-      # hostNetwork: true
-      # hostIPC: true
-
       restartPolicy: Always
 
-      # Run container as root with real-time capabilities
+      # Pod-level security context (user / group)
       securityContext:
         runAsUser: 0
         runAsGroup: 0
         fsGroup: 0
-        capabilities:
-          add:
-            - SYS_NICE
-            - IPC_LOCK
 
       containers:
         - name: voice-stack
           image: docker.dev.highcom.com.cn/voice-stack:latest
           imagePullPolicy: Always
+          
+          env:
+            - name: RUST_LOG
+              value: "debug"
+            - name: RUST_BACKTRACE
+              value: "1"
 
-          # Expose the service ports
+          # Container-level security context (RT audio)
+          securityContext:
+            capabilities:
+              add:
+                - SYS_NICE
+                - IPC_LOCK
+
           ports:
             - name: asrd-tcp
               containerPort: 53101
@@ -47,21 +51,17 @@ spec:
               containerPort: 55303
               protocol: TCP
 
-          # Interactive / debugging mode
           stdin: true
           tty: true
 
           volumeMounts:
-            # Host shared memory (JACK IPC)
             - name: shm
               mountPath: /dev/shm
 
-            # Audio assets (read-only)
             - name: assets-audio
               mountPath: /app/assets/audio
               readOnly: true
 
-            # Configuration files (read-only)
             - name: config
               subPath: znoise_config.toml
               mountPath: /app/config/znoise/config.toml
@@ -73,33 +73,28 @@ spec:
               readOnly: true
 
             - name: config
-              subPath: playctl.toml
+              subPath: playctl_config.toml
               mountPath: /app/config/playctl/config.toml
               readOnly: true
 
-            # Writable VTN runtime directory (tmpfs)
             - name: vtn-bin
               mountPath: /app/bin
 
       volumes:
-        # Shared memory for JACK
         - name: shm
           hostPath:
             path: /dev/shm
             type: Directory
 
-        # Audio assets
         - name: assets-audio
           hostPath:
             path: /opt/voice-stack/assets/audio
             type: Directory
 
-        # Configuration directory
         - name: config
           hostPath:
             path: /opt/k3s/config
             type: Directory
 
-        # Writable tmpfs for VTN runtime
         - name: vtn-bin
           emptyDir: {}
