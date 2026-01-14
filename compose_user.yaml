@@ -1,0 +1,37 @@
+services:
+  voice-stack:
+    image: voice-stack:latest
+    container_name: voice-stack  
+    build: 
+      context: .
+      args:
+        UID: ${UID}
+        GID: ${GID}
+
+    user: "${UID}:${GID}"
+    group_add:
+      - audio
+   
+    # Host networking is required for JACK IPC communication
+    network_mode: host
+    ipc: host
+    
+    # Interactive mode for debugging and management
+    stdin_open: true
+    tty: true
+    
+    volumes:
+      # Required: JACK uses shared memory for audio data transfer
+      - /dev/shm:/dev/shm
+      # Mount assets/audio as read-only
+      - ./assets/audio:/home/jackuser/app/assets/audio:ro
+      - ./config:/home/jackuser/app/config:ro
+      
+    tmpfs:
+      # VTN runtime directory (must be writable)
+      - /home/jackuser/app/bin:uid=${UID},gid=${GID},mode=0755
+    
+    env_file:
+      - .env
+    
+    restart: unless-stopped

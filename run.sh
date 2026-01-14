@@ -1,284 +1,187 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -e
-set -u
+# =============================================================================
+# Resolve script directory (host & container safe)
+# =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ============================================================================ 
+# If run.sh is inside a subdirectory, adjust PROJECT_ROOT accordingly
+PROJECT_ROOT="$SCRIPT_DIR"
+# PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# =============================================================================
+# VTN vendor library path
+# =============================================================================
+VTN_LIB_DIR="$PROJECT_ROOT/crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release"
+
+if [[ ! -d "$VTN_LIB_DIR" ]]; then
+    echo "[ERROR] VTN library directory not found: $VTN_LIB_DIR" >&2
+    exit 1
+fi
+
+# =============================================================================
+# Export runtime environment (ALL centralized here)
+# =============================================================================
+
+# Dynamic linker
+export LD_LIBRARY_PATH="$VTN_LIB_DIR:${LD_LIBRARY_PATH:-}"
+
+# JACK client behavior
+export JACK_DEFAULT_SERVER="system"
+export JACK_START_SERVER="0"
+export JACK_NO_AUDIO_RESERVATION="1"
+
+# =============================================================================
+# Debug output (keep this!)
+# =============================================================================
+echo "[INFO] SCRIPT_DIR              = $SCRIPT_DIR"
+echo "[INFO] PROJECT_ROOT            = $PROJECT_ROOT"
+echo "[INFO] LD_LIBRARY_PATH         = $LD_LIBRARY_PATH"
+echo "[INFO] JACK_DEFAULT_SERVER     = $JACK_DEFAULT_SERVER"
+echo "[INFO] JACK_START_SERVER       = $JACK_START_SERVER"
+echo "[INFO] JACK_NO_AUDIO_RESERVATION= $JACK_NO_AUDIO_RESERVATION"
+
+
+# ============================================================================
 # Configuration
-# ============================================================================ 
-
-AIUI_DIR="."
-VTN_DIR="."
-PLAYCTL_DIR="."
-
-AIUI_BIN="asrd"
-VTN_BIN="znoise"
-PLAYCTL_BIN="playctl"
-
-AIUI_PID_FILE="/tmp/asrd.pid"
-VTN_PID_FILE="/tmp/znoise.pid"
-PLAYCTL_PID_FILE="/tmp/playctl.pid"
+# ============================================================================
+AIUI_BIN="$PROJECT_ROOT/asrd"
+VTN_BIN="$PROJECT_ROOT/znoise"
+PLAYCTL_BIN="$PROJECT_ROOT/playctl"
 
 MAX_WAIT_ATTEMPTS=30
-WAIT_INTERVAL=2
+WAIT_INTERVAL=1
 MAX_CONNECT_RETRIES=5
 
-# ============================================================================ 
-# Colors
-# ============================================================================ 
+# ============================================================================
+# JACK client environment
+# ============================================================================
+export JACK_NO_AUDIO_RESERVATION=1
+export JACK_START_SERVER=0
+export JACK_DEFAULT_SERVER=system
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# ============================================================================
+# Logging helpers
+# ============================================================================
+log_i()   { echo -e "[INFO] $*"; }
+log_w()   { echo -e "[WARN] $*"; }
+log_e()   { echo -e "[ERROR] $*"; }
+log_ok()  { echo -e "[OK] $*"; }
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-
-# ============================================================================ 
-# Helpers
-# ============================================================================ 
-
-is_running() {
-    if [ -f "$1" ]; then
-        PID=$(cat "$1")
-        if kill -0 "$PID" 2>/dev/null; then return 0; fi
-    fi
-    return 1
-}
-
+# ============================================================================
+# Helper functions
+# ============================================================================
 wait_for_jack() {
-    local attempt=0
-    log_info "Waiting for JACK server..."
-    while [ $attempt -lt $MAX_WAIT_ATTEMPTS ]; do
-        if jack_lsp > /dev/null 2>&1; then
-            log_success "JACK server is ready"
+    log_i "Waiting for system JACK server..."
+    for ((i=1;i<=MAX_WAIT_ATTEMPTS;i++)); do
+        if jack_lsp 2>/dev/null | grep -q "^system:"; then
+            log_ok "Connected to JACK server"
             return 0
         fi
-        attempt=$((attempt + 1))
-        log_warn "JACK not ready (attempt $attempt/$MAX_WAIT_ATTEMPTS)"
-        sleep $WAIT_INTERVAL
+        log_w "JACK not ready ($i/$MAX_WAIT_ATTEMPTS)"
+        sleep "$WAIT_INTERVAL"
     done
-    log_error "JACK server not available after $MAX_WAIT_ATTEMPTS attempts"
+    log_e "Cannot connect to system JACK"
     return 1
 }
 
-wait_for_jack_port() {
-    local port_name=$1
-    local attempt=0
-    log_info "Waiting for JACK port: $port_name"
-    while [ $attempt -lt $MAX_WAIT_ATTEMPTS ]; do
-        if jack_lsp 2>/dev/null | grep -q "^${port_name}$"; then
-            log_success "Port $port_name is available"
-            return 0
-        fi
-        attempt=$((attempt + 1))
-        log_warn "Port $port_name not ready (attempt $attempt/$MAX_WAIT_ATTEMPTS)"
-        sleep $WAIT_INTERVAL
+wait_port() {
+    local port="$1"
+    for ((i=1;i<=MAX_WAIT_ATTEMPTS;i++)); do
+        jack_lsp 2>/dev/null | grep -qx "$port" && return 0
+        sleep "$WAIT_INTERVAL"
     done
-    log_error "Port $port_name not available"
+    log_w "Port not found: $port"
     return 1
 }
 
 jack_connect_retry() {
-    local source=$1 dest=$2 attempt=0
-    log_info "Connecting $source -> $dest"
-    while [ $attempt -lt $MAX_CONNECT_RETRIES ]; do
-        if jack_connect "$source" "$dest" 2>/dev/null; then
-            log_success "Connected: $source -> $dest"
+    local src="$1" dst="$2"
+    for ((i=1;i<=MAX_CONNECT_RETRIES;i++)); do
+        jack_connect "$src" "$dst" 2>/dev/null && {
+            log_ok "Connected $src -> $dst"
             return 0
-        fi
-        attempt=$((attempt + 1))
-        if [ $attempt -lt $MAX_CONNECT_RETRIES ]; then
-            log_warn "Connection failed, retrying ($attempt/$MAX_CONNECT_RETRIES)..."
-            sleep 1
-        fi
+        }
+        sleep 1
     done
-    log_error "Failed to connect $source -> $dest after $MAX_CONNECT_RETRIES attempts"
-    return 1
+    log_w "Failed to connect $src -> $dst"
 }
 
-# ============================================================================ 
-# Start Services
-# ============================================================================ 
-
-start_aiui() {
-    log_info "Starting AIUI ASR service..."
-    if is_running "$AIUI_PID_FILE"; then
-        log_warn "AIUI already running (pid $(cat $AIUI_PID_FILE))"
-        return 0
-    fi
-    if [ ! -f "$AIUI_DIR/$AIUI_BIN" ]; then
-        log_error "AIUI binary not found: $AIUI_DIR/$AIUI_BIN"
-        return 1
-    fi
-    ./$AIUI_BIN 2>&1 &
-    echo $! > $AIUI_PID_FILE
-    log_success "AIUI started (PID: $(cat $AIUI_PID_FILE))"
-    sleep 2
+stop_all() {
+    log_i "Stopping all services..."
+    pkill -f "$VTN_BIN" 2>/dev/null || true
+    pkill -f "$AIUI_BIN" 2>/dev/null || true
+    pkill -f "$PLAYCTL_BIN" 2>/dev/null || true
+    log_ok "All services stopped"
 }
 
-start_vtn() {
-    log_info "Starting VTN ZNOISE service..."
-    if is_running "$VTN_PID_FILE"; then
-        log_warn "VTN already running (pid $(cat $VTN_PID_FILE))"
-        return 0
-    fi
-    if [ ! -f "$VTN_DIR/$VTN_BIN" ]; then
-        log_error "VTN binary not found: $VTN_DIR/$VTN_BIN"
-        return 1
-    fi
-    ./$VTN_BIN 2>&1 &
-    echo $! > $VTN_PID_FILE
-    log_success "VTN started (PID: $(cat $VTN_PID_FILE))"
-    sleep 2
+# ============================================================================
+# JACK routing
+# ============================================================================
+connect_routing() {
+    wait_port "vtn:input_1"
+    wait_port "vtn:input_2"
+    wait_port "vtn:output"
+    wait_port "aiui:input"
+
+    jack_connect_retry system:capture_1 vtn:input_1
+    jack_connect_retry system:capture_2 vtn:input_2
+    jack_connect_retry vtn:output aiui:input
+
+    wait_port "playctl:output_left"
+    wait_port "playctl:output_right"
+
+    jack_connect_retry playctl:output_left system:playback_1
+    jack_connect_retry playctl:output_right system:playback_2
+
+    wait_port "vtn:reference_1"
+    wait_port "vtn:reference_2"
+
+    jack_connect_retry playctl:output_left vtn:reference_1
+    jack_connect_retry playctl:output_right vtn:reference_2
 }
 
-start_playctl() {
-    log_info "Starting PLAYCTL service..."
-    if is_running "$PLAYCTL_PID_FILE"; then
-        log_warn "PLAYCTL already running (pid $(cat $PLAYCTL_PID_FILE))"
-        return 0
-    fi
-    if [ ! -f "$PLAYCTL_DIR/$PLAYCTL_BIN" ]; then
-        log_error "PLAYCTL binary not found: $PLAYCTL_DIR/$PLAYCTL_BIN"
-        return 1
-    fi
-    ./$PLAYCTL_BIN 2>&1 &
-    echo $! > $PLAYCTL_PID_FILE
-    log_success "PLAYCTL started (PID: $(cat $PLAYCTL_PID_FILE))"
-    sleep 2
-}
-
-# ============================================================================ 
-# Stop Services
-# ============================================================================ 
-
-stop_aiui() {
-    log_info "Stopping AIUI..."
-    if is_running "$AIUI_PID_FILE"; then
-        PID=$(cat "$AIUI_PID_FILE")
-        kill "$PID" 2>/dev/null && log_success "AIUI stopped (PID: $PID)" || log_warn "Failed to stop AIUI"
-        sleep 1
-        kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null
-        rm -f "$AIUI_PID_FILE"
-    else
-        log_warn "AIUI not running"
-    fi
-}
-
-stop_vtn() {
-    log_info "Stopping VTN..."
-    if is_running "$VTN_PID_FILE"; then
-        PID=$(cat "$VTN_PID_FILE")
-        kill "$PID" 2>/dev/null && log_success "VTN stopped (PID: $PID)" || log_warn "Failed to stop VTN"
-        sleep 1
-        kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null
-        rm -f "$VTN_PID_FILE"
-    else
-        log_warn "VTN not running"
-    fi
-}
-
-stop_playctl() {
-    log_info "Stopping PLAYCTL..."
-    if is_running "$PLAYCTL_PID_FILE"; then
-        PID=$(cat "$PLAYCTL_PID_FILE")
-        kill "$PID" 2>/dev/null && log_success "PLAYCTL stopped (PID: $PID)" || log_warn "Failed to stop PLAYCTL"
-        sleep 1
-        kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null
-        rm -f "$PLAYCTL_PID_FILE"
-    else
-        log_warn "PLAYCTL not running"
-    fi
-}
-
-# ============================================================================ 
-# JACK Routing
-# ============================================================================ 
-
-connect_aiui_vtn_routing() {
-    wait_for_jack_port "vtn:input_1" || return 1
-    wait_for_jack_port "vtn:input_2" || return 1
-    wait_for_jack_port "vtn:output" || return 1
-    wait_for_jack_port "aiui:input" || return 1
-    jack_connect_retry "system:capture_1" "vtn:input_1" || log_warn "Failed"
-    jack_connect_retry "system:capture_2" "vtn:input_2" || log_warn "Failed"
-    jack_connect_retry "vtn:output" "aiui:input" || return 1
-}
-
-connect_playctl_routing() {
-    wait_for_jack_port "playctl:output_left" || return 1
-    wait_for_jack_port "playctl:output_right" || return 1
-    jack_connect_retry "playctl:output_left" "system:playback_1" || log_warn "Failed"
-    jack_connect_retry "playctl:output_right" "system:playback_2" || log_warn "Failed"
-}
-
-connect_vtn_reference_routing() {
-    wait_for_jack_port "playctl:output_left" || return 1
-    wait_for_jack_port "playctl:output_right" || return 1
-    wait_for_jack_port "vtn:reference_1" || return 1
-    wait_for_jack_port "vtn:reference_2" || return 1
-    jack_connect_retry "playctl:output_left" "vtn:reference_1" || log_warn "Failed"
-    jack_connect_retry "playctl:output_right" "vtn:reference_2" || log_warn "Failed"
-}
-
-disconnect_all_routing() {
-    jack_disconnect "system:capture_1" "vtn:input_1" 2>/dev/null || true
-    jack_disconnect "system:capture_2" "vtn:input_2" 2>/dev/null || true
-    jack_disconnect "vtn:output" "aiui:input" 2>/dev/null || true
-    jack_disconnect "playctl:output_left" "system:playback_1" 2>/dev/null || true
-    jack_disconnect "playctl:output_right" "system:playback_2" 2>/dev/null || true
-    jack_disconnect "playctl:output_left" "vtn:reference_1" 2>/dev/null || true
-    jack_disconnect "playctl:output_right" "vtn:reference_2" 2>/dev/null || true
-}
-
-# ============================================================================ 
-# Main
-# ============================================================================ 
-
+# ============================================================================
+# Start all services in Docker-friendly foreground mode
+# ============================================================================
 start() {
-    log_info "Starting all services..."
-    wait_for_jack || { log_error "JACK unavailable"; return 1; }
-    start_aiui
-    start_vtn
-    start_playctl
-    sleep 3
-    connect_aiui_vtn_routing || log_warn "AIUI+VTN routing failed"
-    connect_playctl_routing || log_warn "PLAYCTL routing failed"
-    connect_vtn_reference_routing || log_warn "VTN reference routing failed"
-    log_success "All services started"
+    wait_for_jack
+    log_i "Starting services..."
+
+    # Launch services in background — logs go directly to Docker stdout
+    "$VTN_BIN" &
+    VTN_PID=$!
+    "$AIUI_BIN" &
+    AIUI_PID=$!
+    "$PLAYCTL_BIN" &
+    PLAYCTL_PID=$!
+
+    # Give services a moment before JACK routing
+    sleep 2
+    connect_routing
+    log_ok "All services started"
+
+    # Wait for any service to exit
+    wait -n $VTN_PID $AIUI_PID $PLAYCTL_PID
+    EXIT_STATUS=$?
+
+    log_e "One of the services exited! Stopping remaining services..."
+    stop_all
+    exit $EXIT_STATUS
 }
 
-stop() {
-    log_info "Stopping all services..."
-    disconnect_all_routing
-    stop_playctl
-    stop_vtn
-    stop_aiui
-    log_success "All services stopped"
-}
+# ============================================================================
+# Signal handling
+# ============================================================================
+trap stop_all SIGINT SIGTERM
 
-restart() { stop; sleep 2; start; }
-
-status() {
-    [ -f "$AIUI_PID_FILE" ] && log_success "AIUI running" || log_warn "AIUI not running"
-    [ -f "$VTN_PID_FILE" ] && log_success "VTN running" || log_warn "VTN not running"
-    [ -f "$PLAYCTL_PID_FILE" ] && log_success "PLAYCTL running" || log_warn "PLAYCTL not running"
-    jack_lsp > /dev/null 2>&1 && log_success "JACK server available" || log_error "JACK unavailable"
-}
-
-cleanup() { log_warn "Stopping services..."; stop; exit 1; }
-
-trap cleanup SIGTERM SIGINT
-
-case "${1:-}" in
-    start) start; log_info "Services running"; wait ;;
-    stop) stop ;;
-    restart) restart; log_info "Services restarted"; wait ;;
-    status) status ;;
-    *) echo "Usage: $0 {start|stop|restart|status}"; exit 1 ;;
+# ============================================================================
+# Script entry point
+# ============================================================================
+case "${1:-start}" in
+    start) start ;;
+    stop) stop_all ;;
+    restart) stop_all; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}" ;;
 esac

@@ -1,59 +1,64 @@
+# ------------------------------------------------------------
 # Runtime image for voice-stack (JACK-based audio services)
-
+# ------------------------------------------------------------
 FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# ------------------------------------------------------------
+# Install dependencies
+# ------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libjack-jackd2-0 \
-    ca-certificates \
-    jack-tools \
-    bash \
-    curl \
-    procps \
- && rm -rf /var/lib/apt/lists/*
-
-ARG UID=1000
-ARG GID=1000
-
-RUN groupadd -g ${GID} jackuser \
- && useradd -m -u ${UID} -g ${GID} -s /bin/bash jackuser \
- && usermod -aG audio jackuser
+        libjack-jackd2-0 \
+        jack-tools \
+        bash \
+        curl \
+        procps \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------
-# create app directory explicitly and fix ownership
+# Set workdir and copy binaries
 # ------------------------------------------------------------
-RUN mkdir -p /home/jackuser/app \
- && chown -R jackuser:jackuser /home/jackuser
+WORKDIR /app
 
-WORKDIR /home/jackuser/app
+# Copy compiled binaries and entrypoint script
+COPY target/aarch64-unknown-linux-gnu/release/asrd \
+     target/aarch64-unknown-linux-gnu/release/znoise \
+     target/aarch64-unknown-linux-gnu/release/playctl \
+     run.sh \
+     ./
 
-COPY --chown=jackuser:jackuser \
-    target/aarch64-unknown-linux-gnu/release/asrd \
-    target/aarch64-unknown-linux-gnu/release/znoise \
-    target/aarch64-unknown-linux-gnu/release/playctl \
-    run.sh \
-    ./
+# Copy libraries and resources
+COPY crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release/ ./crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release
+COPY res/ ./res/
 
-COPY --chown=jackuser:jackuser crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release/ ./lib/
-COPY --chown=jackuser:jackuser res/ ./res/
+# ------------------------------------------------------------
+# Fix permissions for root user
+# ------------------------------------------------------------
+RUN chmod +x asrd znoise playctl run.sh \
+    && [ -d lib ] && find lib -type d -exec chmod 755 {} \; || true \
+    && [ -d lib ] && find lib -type f -exec chmod 644 {} \; || true \
+    && [ -d res ] && find res -type d -exec chmod 755 {} \; || true \
+    && [ -d res ] && find res -type f -exec chmod 644 {} \; || true \
+    && mkdir -p bin assets/audio config \
+    && chmod 755 bin assets config
 
-RUN chmod 755 asrd znoise playctl run.sh \
- && chmod 644 lib/libvtn.so \
- && [ -d lib ] && find lib -type d -exec chmod 755 {} \; || true \
- && [ -d res ] && find res -type d -exec chmod 755 {} \; || true \
- && [ -d res ] && find res -type f -exec chmod 644 {} \; || true \
- && mkdir -p \
-    bin \
-    assets/audio \
-    config \
- && chown -R jackuser:jackuser bin assets config 
+# ------------------------------------------------------------
+# Environment for system JACK (root/systemd)
+# ------------------------------------------------------------
+ENV LD_LIBRARY_PATH=/app/crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release \
+    JACK_DEFAULT_SERVER=system \
+    JACK_NO_AUDIO_RESERVATION=1 \
+    JACK_START_SERVER=0
 
-ENV \
-  LD_LIBRARY_PATH=/home/jackuser/app/lib \
-  JACK_DEFAULT_SERVER=default
+# ------------------------------------------------------------
+# Run as root (default)
+# ------------------------------------------------------------
+USER root
 
-USER jackuser
-
+# ------------------------------------------------------------
+# Entrypoint
+# ------------------------------------------------------------
 ENTRYPOINT ["./run.sh"]
 CMD ["start"]

@@ -6,39 +6,47 @@ metadata:
     app: voice-stack
   namespace: robot
 spec:
+  # Single replica is required because JACK cannot be shared across pods
   replicas: 1
+
+  # Recreate strategy is mandatory when using hostNetwork / hostIPC
   strategy:
     type: Recreate
+
   selector:
     matchLabels:
       app: voice-stack
+
   template:
     metadata:
       labels:
         app: voice-stack
     spec:
-      # Host networking and IPC are optional; uncomment if needed
-      # hostNetwork: true
-      # hostIPC: true
+      # Use host network so JACK IPC works correctly
+      hostNetwork: true
+
+      # Share host IPC namespace (required for JACK shared memory)
+      hostIPC: true
 
       restartPolicy: Always
 
-      # Run container as root with real-time capabilities
       securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-        fsGroup: 0
-        capabilities:
-          add:
-            - SYS_NICE
-            - IPC_LOCK
+        # Run container with the same UID/GID as the host user
+        runAsUser: 1000
+        runAsGroup: 1000
+
+        # Ensure mounted volumes are accessible by the container user
+        fsGroup: 1000
+
+        # Add supplementary groups (audio group is usually GID 29)
+        supplementalGroups:
+          - 29
 
       containers:
         - name: voice-stack
           image: docker.dev.highcom.com.cn/voice-stack:latest
           imagePullPolicy: Always
-
-          # Expose the service ports
+          
           ports:
             - name: asrd-tcp
               containerPort: 53101
@@ -46,60 +54,60 @@ spec:
             - name: playctl-http
               containerPort: 55303
               protocol: TCP
-
-          # Interactive / debugging mode
+  
+          # Enable interactive mode (similar to docker-compose stdin_open + tty)
           stdin: true
           tty: true
 
           volumeMounts:
-            # Host shared memory (JACK IPC)
+            # Mount host shared memory where JACK sockets are created
             - name: shm
               mountPath: /dev/shm
 
-            # Audio assets (read-only)
+            # Mount audio assets as read-only
             - name: assets-audio
-              mountPath: /app/assets/audio
+              mountPath: /home/jackuser/app/assets/audio
               readOnly: true
 
-            # Configuration files (read-only)
+            # Mount configuration directory
             - name: config
               subPath: znoise_config.toml
-              mountPath: /app/config/znoise/config.toml
+              mountPath: /home/jackuser/app/config/znoise/config.toml
               readOnly: true
-
+            
             - name: config
               subPath: asrd_config.toml
-              mountPath: /app/config/asrd/config.toml
+              mountPath: /home/jackuser/app/config/asrd/config.toml
               readOnly: true
 
             - name: config
               subPath: playctl.toml
-              mountPath: /app/config/playctl/config.toml
-              readOnly: true
+              mountPath: /home/jackuser/app/config/playctl/config.toml
+              readOnly: true            
 
-            # Writable VTN runtime directory (tmpfs)
+            # VTN creates ./bin and ./bin/output
             - name: vtn-bin
-              mountPath: /app/bin
+              mountPath: /home/jackuser/app/bin
 
       volumes:
-        # Shared memory for JACK
+        # Host shared memory (required for JACK IPC)
         - name: shm
           hostPath:
             path: /dev/shm
             type: Directory
 
-        # Audio assets
+        # Audio assets directory on the host
         - name: assets-audio
           hostPath:
             path: /opt/voice-stack/assets/audio
             type: Directory
 
-        # Configuration directory
+        # Configuration directory on the host
         - name: config
           hostPath:
             path: /opt/k3s/config
             type: Directory
-
-        # Writable tmpfs for VTN runtime
+        
+        # Writable bin directory for VTN
         - name: vtn-bin
           emptyDir: {}
