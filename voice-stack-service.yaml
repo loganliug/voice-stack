@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-stack-service
+  namespace: robot
+  labels:
+    app: voice-stack
+spec:
+  publishNotReadyAddresses: true
+  type: ClusterIP
+  selector:
+    app: voice-stack
+  ports:
+    - name: asrd-tcp
+      port: 53101
+      targetPort: 53101
+      protocol: TCP
+    - name: playctl-http
+      port: 55303
+      targetPort: 55303
+      protocol: TCP
