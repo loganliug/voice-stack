@@ -17,8 +17,8 @@ services:
         soft: -1
         hard: -1
 
-    # Host networking and IPC are optional; can be commented if ports are exposed
-    # network_mode: host
+    # use host network to share MAC address with host
+    network_mode: host
     # ipc: host
 
     # Interactive mode for debugging and management

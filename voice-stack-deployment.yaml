@@ -17,6 +17,8 @@ spec:
       labels:
         app: voice-stack
     spec:
+      # use host network to share MAC address with host
+      hostNetwork: true
       restartPolicy: Always
 
       # Pod-level security context (user / group)

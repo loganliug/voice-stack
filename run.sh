@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # If run.sh is inside a subdirectory, adjust PROJECT_ROOT accordingly
 PROJECT_ROOT="$SCRIPT_DIR"
+BIN_DIR="$PROJECT_ROOT/target/aarch64-unknown-linux-gnu/release"
+
 # PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # =============================================================================
@@ -46,9 +48,9 @@ echo "[INFO] JACK_NO_AUDIO_RESERVATION= $JACK_NO_AUDIO_RESERVATION"
 # ============================================================================
 # Configuration
 # ============================================================================
-AIUI_BIN="$PROJECT_ROOT/asrd"
-VTN_BIN="$PROJECT_ROOT/znoise"
-PLAYCTL_BIN="$PROJECT_ROOT/playctl"
+AIUI_BIN="$BIN_DIR/asrd"
+VTN_BIN="$BIN_DIR/znoise"
+PLAYCTL_BIN="$BIN_DIR/playctl"
 
 MAX_WAIT_ATTEMPTS=30
 WAIT_INTERVAL=1

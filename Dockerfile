@@ -22,21 +22,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ------------------------------------------------------------
 WORKDIR /app
 
-# Copy compiled binaries and entrypoint script
+# Copy compiled binaries
 COPY target/aarch64-unknown-linux-gnu/release/asrd \
      target/aarch64-unknown-linux-gnu/release/znoise \
      target/aarch64-unknown-linux-gnu/release/playctl \
-     run.sh \
-     ./
+     target/aarch64-unknown-linux-gnu/release/
 
-# Copy libraries and resources
-COPY crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release/ ./crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release
-COPY res/ ./res/
+# Copy entrypoint script
+COPY run.sh ./
+
+# Copy resources
+COPY res/ res/
+
+# Copy libraries 
+COPY crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release/ crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release
+
 
 # ------------------------------------------------------------
 # Fix permissions for root user
 # ------------------------------------------------------------
-RUN chmod +x asrd znoise playctl run.sh \
+RUN chmod +x run.sh \
+    target/aarch64-unknown-linux-gnu/release/asrd \
+    target/aarch64-unknown-linux-gnu/release/znoise \
+    target/aarch64-unknown-linux-gnu/release/playctl \
     && [ -d lib ] && find lib -type d -exec chmod 755 {} \; || true \
     && [ -d lib ] && find lib -type f -exec chmod 644 {} \; || true \
     && [ -d res ] && find res -type d -exec chmod 755 {} \; || true \
