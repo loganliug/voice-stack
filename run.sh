@@ -2,188 +2,183 @@
 set -euo pipefail
 
 # =============================================================================
-# Resolve script directory (host & container safe)
+# Environment paths
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# If run.sh is inside a subdirectory, adjust PROJECT_ROOT accordingly
 PROJECT_ROOT="$SCRIPT_DIR"
 BIN_DIR="$PROJECT_ROOT/target/aarch64-unknown-linux-gnu/release"
-
-# PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# =============================================================================
-# VTN vendor library path
-# =============================================================================
 VTN_LIB_DIR="$PROJECT_ROOT/crates/vtn/vtn-sys/vendor/linaro7.5.0_x64_release"
 
-if [[ ! -d "$VTN_LIB_DIR" ]]; then
-    echo "[ERROR] VTN library directory not found: $VTN_LIB_DIR" >&2
-    exit 1
-fi
+[[ -d "$VTN_LIB_DIR" ]] || { echo "[ERROR] VTN library not found: $VTN_LIB_DIR"; exit 1; }
 
-# =============================================================================
-# Export runtime environment (ALL centralized here)
-# =============================================================================
-
-# Dynamic linker
 export LD_LIBRARY_PATH="$VTN_LIB_DIR:${LD_LIBRARY_PATH:-}"
-
-# JACK client behavior
 export JACK_DEFAULT_SERVER="system"
 export JACK_START_SERVER="0"
 export JACK_NO_AUDIO_RESERVATION="1"
 
-# =============================================================================
-# Debug output (keep this!)
-# =============================================================================
-echo "[INFO] SCRIPT_DIR              = $SCRIPT_DIR"
-echo "[INFO] PROJECT_ROOT            = $PROJECT_ROOT"
-echo "[INFO] LD_LIBRARY_PATH         = $LD_LIBRARY_PATH"
-echo "[INFO] JACK_DEFAULT_SERVER     = $JACK_DEFAULT_SERVER"
-echo "[INFO] JACK_START_SERVER       = $JACK_START_SERVER"
-echo "[INFO] JACK_NO_AUDIO_RESERVATION= $JACK_NO_AUDIO_RESERVATION"
-
-
-# ============================================================================
-# Configuration
-# ============================================================================
 AIUI_BIN="$BIN_DIR/asrd"
 VTN_BIN="$BIN_DIR/znoise"
 PLAYCTL_BIN="$BIN_DIR/playctl"
 
-MAX_WAIT_ATTEMPTS=30
-WAIT_INTERVAL=1
-MAX_CONNECT_RETRIES=5
-
-# ============================================================================
-# JACK client environment
-# ============================================================================
-export JACK_NO_AUDIO_RESERVATION=1
-export JACK_START_SERVER=0
-export JACK_DEFAULT_SERVER=system
-
-# ============================================================================
+# =============================================================================
 # Logging helpers
-# ============================================================================
-log_i()   { echo -e "[INFO] $*"; }
-log_w()   { echo -e "[WARN] $*"; }
-log_e()   { echo -e "[ERROR] $*"; }
-log_ok()  { echo -e "[OK] $*"; }
+# =============================================================================
+log_i()  { echo "[INFO] $*"; }
+log_w()  { echo "[WARN] $*"; }
+log_e()  { echo "[ERROR] $*"; }
+log_ok() { echo "[OK] $*"; }
 
-# ============================================================================
-# Helper functions
-# ============================================================================
+# =============================================================================
+# General settings for JACK and waiting
+# =============================================================================
+WAIT_INTERVAL=1
+MAX_WAIT_ATTEMPTS=30
+CONNECT_TIMEOUT=30  # total timeout in seconds for connect_routing
+
+# =============================================================================
+# Wait for JACK system server
+# =============================================================================
 wait_for_jack() {
     log_i "Waiting for system JACK server..."
     for ((i=1;i<=MAX_WAIT_ATTEMPTS;i++)); do
         if jack_lsp 2>/dev/null | grep -q "^system:"; then
-            log_ok "Connected to JACK server"
+            log_ok "Connected to JACK"
             return 0
         fi
-        log_w "JACK not ready ($i/$MAX_WAIT_ATTEMPTS)"
         sleep "$WAIT_INTERVAL"
     done
-    log_e "Cannot connect to system JACK"
+    log_e "Cannot connect to JACK server"
     return 1
 }
 
-wait_port() {
-    local port="$1"
-    for ((i=1;i<=MAX_WAIT_ATTEMPTS;i++)); do
-        jack_lsp 2>/dev/null | grep -qx "$port" && return 0
-        sleep "$WAIT_INTERVAL"
-    done
-    log_w "Port not found: $port"
-    return 1
-}
-
+# =============================================================================
+# JACK connection with retry
+# =============================================================================
 jack_connect_retry() {
-    local src="$1" dst="$2"
-    for ((i=1;i<=MAX_CONNECT_RETRIES;i++)); do
-        jack_connect "$src" "$dst" 2>/dev/null && {
+    local src=$1 dst=$2
+    for ((i=1;i<=5;i++)); do
+        if jack_connect "$src" "$dst" 2>/dev/null; then
             log_ok "Connected $src -> $dst"
             return 0
-        }
+        fi
         sleep 1
     done
     log_w "Failed to connect $src -> $dst"
+    return 1
 }
 
-stop_all() {
-    log_i "Stopping all services..."
-    pkill -f "$VTN_BIN" 2>/dev/null || true
-    pkill -f "$AIUI_BIN" 2>/dev/null || true
-    pkill -f "$PLAYCTL_BIN" 2>/dev/null || true
-    log_ok "All services stopped"
-}
-
-# ============================================================================
-# JACK routing
-# ============================================================================
+# =============================================================================
+# Connect routing (foreground) with total timeout
+# =============================================================================
 connect_routing() {
-    wait_port "vtn:input_1"
-    wait_port "vtn:input_2"
-    wait_port "vtn:output"
-    wait_port "aiui:input"
+    local ports=( \
+        "vtn:input_1" \
+        "vtn:input_2" \
+        "vtn:reference_1" \
+        "vtn:reference_2" \
+        "vtn:output" \
+        "aiui:input" \
+        "playctl:output_left" \
+        "playctl:output_right" \
+    )
 
-    jack_connect_retry system:capture_1 vtn:input_1
+    log_i "Waiting for JACK ports (total timeout ${CONNECT_TIMEOUT}s)..."
+    local start_time=$(date +%s)
+    local all_ready=1
+
+    for port in "${ports[@]}"; do
+        while true; do
+            if jack_lsp 2>/dev/null | grep -qx "$port"; then
+                log_ok "Port ready: $port"
+                break
+            fi
+            local now=$(date +%s)
+            local elapsed=$(( now - start_time ))
+            if (( elapsed >= CONNECT_TIMEOUT )); then
+                log_w "Timeout waiting for port: $port"
+                all_ready=0
+                break
+            fi
+            sleep "$WAIT_INTERVAL"
+        done
+    done
+
+    if (( all_ready == 0 )); then
+        log_e "Some ports were not ready within timeout!"
+        return 1  # critical failure
+    else
+        log_ok "All ports ready"
+    fi
+
+    # Perform JACK connections
+    jack_connect_retry system:capture_1 vtn:input_1 
     jack_connect_retry system:capture_2 vtn:input_2
     jack_connect_retry vtn:output aiui:input
-
-    wait_port "playctl:output_left"
-    wait_port "playctl:output_right"
-
     jack_connect_retry playctl:output_left system:playback_1
     jack_connect_retry playctl:output_right system:playback_2
-
-    wait_port "vtn:reference_1"
-    wait_port "vtn:reference_2"
-
     jack_connect_retry playctl:output_left vtn:reference_1
     jack_connect_retry playctl:output_right vtn:reference_2
+
+    log_ok "Routing completed"
+    return 0
 }
 
-# ============================================================================
-# Start all services in Docker-friendly foreground mode
-# ============================================================================
-start() {
-    wait_for_jack
-    log_i "Starting services..."
-
-    # Launch services in background — logs go directly to Docker stdout
+# =============================================================================
+# Service startup functions
+# =============================================================================
+start_vtn() {
+    log_i "Starting VTN service..."
     "$VTN_BIN" &
     VTN_PID=$!
+}
+
+start_aiui() {
+    log_i "Starting AIUI service..."
     "$AIUI_BIN" &
     AIUI_PID=$!
+}
+
+start_playctl() {
+    log_i "Starting Playctl service..."
     "$PLAYCTL_BIN" &
     PLAYCTL_PID=$!
+}
 
-    # Give services a moment before JACK routing
+# =============================================================================
+# Start all services and manage lifecycle
+# =============================================================================
+start() {
+    wait_for_jack
+
+    start_vtn
+    start_aiui
+    start_playctl
+
     sleep 2
-    connect_routing
-    log_ok "All services started"
+
+    # Run routing in foreground: must succeed
+    if ! connect_routing; then
+        log_e "Routing failed, stopping all services..."
+        pkill -P $$ 2>/dev/null || true
+        exit 1
+    fi
+    log_ok "Routing successful"
 
     # Wait for any service to exit
     wait -n $VTN_PID $AIUI_PID $PLAYCTL_PID
     EXIT_STATUS=$?
-
-    log_e "One of the services exited! Stopping remaining services..."
-    stop_all
+    log_e "One service exited, stopping remaining..."
+    pkill -P $$ 2>/dev/null || true
     exit $EXIT_STATUS
 }
 
-# ============================================================================
-# Signal handling
-# ============================================================================
-trap stop_all SIGINT SIGTERM
+# =============================================================================
+# Signal handling for graceful shutdown
+# =============================================================================
+trap 'log_i "Terminating all child processes"; pkill -P $$ 2>/dev/null || true' SIGINT SIGTERM
 
-# ============================================================================
+
+# =============================================================================
 # Script entry point
-# ============================================================================
-case "${1:-start}" in
-    start) start ;;
-    stop) stop_all ;;
-    restart) stop_all; sleep 1; start ;;
-    *) echo "Usage: $0 {start|stop|restart}" ;;
-esac
+# =============================================================================
+start

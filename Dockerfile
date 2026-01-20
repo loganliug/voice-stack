@@ -69,4 +69,3 @@ USER root
 # Entrypoint
 # ------------------------------------------------------------
 ENTRYPOINT ["./run.sh"]
-CMD ["start"]
